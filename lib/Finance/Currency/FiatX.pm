@@ -38,6 +38,49 @@ our %args_caching = (
 
 );
 
+our %args_convert = (
+    amount => {
+        schema => 'num*',
+        default => 1,
+    },
+    from => {
+        schema => 'currency::code*',
+        req => 1,
+    },
+    to => {
+        schema => 'currency::code*',
+        req => 1,
+    },
+    type => {
+        summary => 'Which rate is wanted? e.g. sell, buy',
+        schema => 'str*',
+        default => 'sell', # because we want to buy
+    },
+    # XXX source
+);
+
+sub _get_db_schema_spec {
+    my $table_prefix = shift;
+
+    +{
+        latest_v => 1,
+        component_name => 'fiatx',
+        provides => ["${table_prefix}rate"],
+        install => [
+            "CREATE TABLE ${table_prefix}rate (
+                 time DOUBLE NOT NULL,
+                 currency1 VARCHAR(10) NOT NULL,
+                 currency2 VARCHAR(10) NOT NULL,
+                 rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of currency1 to currency2, e.g. currency1 = USD, currency2 = IDR, rate = 14000
+                 source VARCHAR(10) NOT NULL,         -- e.g. KlikBCA
+                 type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
+                 note VARCHAR(255)
+             )",
+            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(time)",
+        ],
+    };
+}
+
 sub _init {
     require SQL::Schema::Versioned;
 
@@ -47,27 +90,10 @@ sub _init {
     $args->{max_age_current} //= 24*3600;
     $args->{amount} //= 1;
 
-    my $table_prefix = $args->{table_prefix};
-
-    my $spec = {
-        latest_v => 1,
-        component_name => 'fiatx',
-        provides => ["${table_prefix}rate"],
-        install => [
-            "CREATE TABLE ${table_prefix}rate (
-                 time DOUBLE NOT NULL, INDEX(time),
-                 currency1 VARCHAR(10) NOT NULL,
-                 currency2 VARCHAR(10) NOT NULL,
-                 rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of currency1 to currency2, e.g. currency1 = USD, currency2 = IDR, rate = 14000
-                 source VARCHAR(10) NOT NULL,         -- e.g. KlikBCA
-                 type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
-                 note VARCHAR(255)
-             )",
-        ],
-    };
+    my $db_schema_spec = _get_db_schema_spec($args->{table_prefix});
 
     my $res = SQL::Schema::Versioned::create_or_update_db_schema(
-        dbh => $args->{dbh}, spec => $spec,
+        dbh => $args->{dbh}, spec => $db_schema_spec,
     );
     $res->[0] == 200 or die "Can't initialize FiatX's database schema: $res->[1]";
 }
@@ -78,23 +104,7 @@ $SPEC{convert_fiat_currency} = {
     args => {
         %args_db,
         %args_caching,
-        amount => {
-            schema => 'num*',
-            default => 1,
-        },
-        from => {
-            schema => 'currency::code*',
-            req => 1,
-        },
-        to => {
-            schema => 'currency::code*',
-            req => 1,
-        },
-        type => {
-            summary => 'Which rate is wanted? e.g. sell, buy',
-            default => 'sell', # because we want to buy
-        },
-        # XXX source
+        %args_convert,
     },
 };
 sub convert_fiat_currency {
