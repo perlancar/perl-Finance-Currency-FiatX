@@ -150,7 +150,7 @@ sub convert_fiat_currency {
         return $dbh->selectrow_hashref(
             "SELECT * FROM ${table_prefix}rate WHERE time >= ? AND from_currency=? AND to_currency=?".
                 ($args{type} ? " AND type=?" : "").
-                " ORDER BY time,source,type DESC LIMIT 1", {},
+                " ORDER BY time DESC,source,type LIMIT 1", {},
             $now - max($max_age_cache, $max_age_current),
             $from, $to,
             ($args{type} ? ($args{type}) : ()),
