@@ -29,13 +29,6 @@ our %args_caching = (
         schema => 'posint*',
         default => 4*3600,
     },
-    max_age_current => {
-        summary => 'Above this age (in seconds), '.
-            'we no longer consider the rate to be "current" but "historical"',
-        schema => 'posint*',
-        default => 24*3600,
-    },
-
 );
 
 our %args_convert = (
@@ -53,10 +46,23 @@ our %args_convert = (
     },
     type => {
         summary => 'Which rate is wanted? e.g. sell, buy',
-        schema => 'str*',
+        schema => 'str*', in=>['sell', 'buy', '', ''],
         default => 'sell', # because we want to buy
     },
-    # XXX source
+    source => {
+        summary => 'Ask for a specific remote source',
+        schema => 'str*',
+        description => <<'_',
+
+If you want a specific remote source, you can specify it here. The default (when
+left undef) is to pick the first source that returns a recent enough current
+rate.
+
+Special values: `:highest` to return highest rate of all sources, `:lowest` to
+return lowest rate of all sources.
+
+_
+    },
 );
 
 sub _get_db_schema_spec {
@@ -68,7 +74,8 @@ sub _get_db_schema_spec {
         provides => ["${table_prefix}rate"],
         install => [
             "CREATE TABLE ${table_prefix}rate (
-                 time DOUBLE NOT NULL,
+                 query_time DOUBLE NOT NULL, -- when do we query the source?
+                 mtime DOUBLE, -- when is the rate last updated, according to the source?
                  from_currency VARCHAR(10) NOT NULL,
                  to_currency   VARCHAR(10) NOT NULL,
                  rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
@@ -78,8 +85,23 @@ sub _get_db_schema_spec {
              )",
             "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(time)",
         ],
+        upgrade_to_v3 => [
+            "ALTER TABLE ${table_prefix}rate CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
+        ],
         upgrade_to_v2 => [
             "ALTER TABLE ${table_prefix}rate CHANGE currency1 from_currency VARCHAR(10) NOT NULL, CHANGE currency2 to_currency VARCHAR(10) NOT NULL",
+        ],
+        install_v2 => [
+            "CREATE TABLE ${table_prefix}rate (
+                 time DOUBLE NOT NULL,
+                 from_currency VARCHAR(10) NOT NULL,
+                 to_currency   VARCHAR(10) NOT NULL,
+                 rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
+                 source VARCHAR(10) NOT NULL,         -- e.g. KlikBCA
+                 type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
+                 note VARCHAR(255)
+             )",
+            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(time)",
         ],
         install_v1 => [
             "CREATE TABLE ${table_prefix}rate (
@@ -102,7 +124,6 @@ sub _init {
     my ($args) = @_;
     $args->{table_prefix} //= 'fiatx_';
     $args->{max_age_cache} //= 4*3600;
-    $args->{max_age_current} //= 24*3600;
     $args->{amount} //= 1;
 
     my $db_schema_spec = _get_db_schema_spec($args->{table_prefix});
@@ -128,34 +149,41 @@ sub convert_fiat_currency {
     _init(\%args);
     my $dbh = $args{dbh};
     my $table_prefix = $args{table_prefix};
+    my $source = $args{source};
     my $max_age_cache = $args{max_age_cache};
-    my $max_age_current = $args{max_age_current};
 
     my $from   = $args{from};
     my $to     = $args{to};
-    my $amount = $args{amount};
+    my $amount = $args{amount} // 1;
+    my $type   = $args{type} // 'sell';
 
     # in case user does this
     if ($from eq $to) {
         return [200, "OK (no conversion)", $amount];
     }
 
-    my $now = time();
-
     my $sth_insert = $dbh->prepare(
-        "INSERT INTO ${table_prefix}rate (time, from_currency,to_currency,rate,type, source,note) VALUES (?, ?,?,?,?, ?,?)"
+        "INSERT INTO ${table_prefix}rate (query_time,mtime, from_currency,to_currency,rate,type, source,note) VALUES (?,?, ?,?,?,?, ?,?)"
     );
 
+    my $now = time();
+
     my $code_query_db = sub {
+        my ($source) = @_;
         return $dbh->selectrow_hashref(
-            "SELECT * FROM ${table_prefix}rate WHERE time >= ? AND from_currency=? AND to_currency=?".
+            "SELECT * FROM ${table_prefix}rate WHERE source=? AND query_time >= ? AND from_currency=? AND to_currency=?".
                 ($args{type} ? " AND type=?" : "").
                 " ORDER BY time DESC,source,type LIMIT 1", {},
-            $now - max($max_age_cache, $max_age_current),
-            $from, $to,
-            ($args{type} ? ($args{type}) : ()),
+            $source, $now - $max_age_cache, $from, $to, $type,
         );
     };
+
+    my @from_sources;
+  QUERY_KLIKBCA:
+    {
+        last unless $source && $source ne 'klikbca' || $from eq 'IDR' || $to eq 'IDR';
+        my $row = $code_query_db->('klikbca');
+        unless ($row) {
 
     # try local database
     my $row = $code_query_db->();
@@ -192,6 +220,14 @@ sub convert_fiat_currency {
             my ($sell_er, $buy_er) = ($res->[2]{currencies}{$fcur}{sell_er}, $res->[2]{currencies}{$fcur}{buy_er});
             if (!$sell_er || !$buy_er) {
                 log_warn "sell_er and/or buy_er prices are zero or not found, skipping using KlikBCA prices";
+                last TRY_KLIKBCA;
+            }
+            if (!$res->[2]{mtime_er}) {
+                log_warn "No last update time information for e-Rate returned, skipping using KlikBCA prices";
+                last TRY_KLIKBCA;
+            }
+            if ($now - $res->[2]{mtime_er} > 4*86400) {
+                log_warn "Last update time information for e-Rate is over 4 days old, skipping using KlikBCA prices";
                 last TRY_KLIKBCA;
             }
             log_trace "Got $fcur-IDR rates from KlikBCA: sell_er=%s=%.8f, buy_er=%.8f", $sell_er, $buy_er;
