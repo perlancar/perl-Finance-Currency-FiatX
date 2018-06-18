@@ -106,7 +106,7 @@ sub _get_db_schema_spec {
     my $table_prefix = shift;
 
     +{
-        latest_v => 3,
+        latest_v => 4,
         component_name => 'fiatx',
         provides => ["${table_prefix}rate"],
         install => [
@@ -119,15 +119,33 @@ sub _get_db_schema_spec {
                  rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
                  source VARCHAR(10) NOT NULL,
                  type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
-                 note VARCHAR(255)
+                 note VARCHAR(255),
+                 _key TINYINT -- 1 = get_spot_rate, 2=get_all_spot_rates
              )",
             "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
+        ],
+        upgrade_to_v4 => [
+            "ALTER TABLE ${table_prefix}rate ADD _key TINYINT",
         ],
         upgrade_to_v3 => [
             "ALTER TABLE ${table_prefix}rate ADD id INT NOT NULL PRIMARY KEY AUTO_INCREMENT FIRST, CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
         ],
         upgrade_to_v2 => [
             "ALTER TABLE ${table_prefix}rate CHANGE currency1 from_currency VARCHAR(10) NOT NULL, CHANGE currency2 to_currency VARCHAR(10) NOT NULL",
+        ],
+        install_v3 => [
+            "CREATE TABLE ${table_prefix}rate (
+                 id INT NOT NULL PRIMARY KEY,
+                 query_time DOUBLE NOT NULL, -- when do we query the source?
+                 mtime DOUBLE, -- when is the rate last updated, according to the source?
+                 from_currency VARCHAR(10) NOT NULL,
+                 to_currency   VARCHAR(10) NOT NULL,
+                 rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
+                 source VARCHAR(10) NOT NULL,
+                 type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
+                 note VARCHAR(255)
+             )",
+            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
         ],
         install_v2 => [
             "CREATE TABLE ${table_prefix}rate (
@@ -230,13 +248,13 @@ sub _get_all_spot_rates_or_get_spot_rate {
 
     my $sth_insert = $dbh->prepare(
         "INSERT INTO ${table_prefix}rate
-           (query_time,mtime, from_currency,to_currency,rate,type, source,note) VALUES
-           (?,?, ?,?,?,?, ?,?)"
+           (query_time,mtime, from_currency,to_currency,rate,type, source,note, _key) VALUES
+           (?,?, ?,?,?,?, ?,?, ?)"
     );
 
     my $now = time();
 
-    my $code_query_db_get_rate_from_a_source = sub {
+    my $code_query_db_get_spot_rate_from_a_source = sub {
         my ($source) = @_;
         return $dbh->selectrow_hashref(
             "SELECT
@@ -259,7 +277,34 @@ sub _get_all_spot_rates_or_get_spot_rate {
             $source, $now - $max_age_cache, $from, $to, $type,
         );
     };
-    my $code_query_db_get_rate_from_any_source = sub {
+    my $code_query_db_get_all_spot_rates = sub {
+        my $sth = $dbh->prepare(
+          "SELECT
+             1 cached,
+             CONCAT(from_currency,'/',to_currency) pair,
+             type,
+             rate,
+             note,
+             source,
+             query_time cache_time
+           FROM ${table_prefix}rate
+           WHERE
+             query_time >= ? AND
+             ".($source =~ /\A\w+\z/ ? " source=? AND" : "")."
+             _key=2
+           ORDER BY query_time, pair, type DESC
+           ");
+        $sth->execute(
+            $now - $max_age_cache,
+            ($source) x !!($source =~ /\A\w+\z/)
+        );
+        my @rows;
+        while (my $row = $sth->fetchrow_hashref) {
+            push @rows, $row;
+        }
+        @rows;
+    };
+    my $code_query_db_get_spot_rate_from_any_source = sub {
         return $dbh->selectrow_hashref(
             "SELECT
                1 cached,
@@ -280,7 +325,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
             $now - $max_age_cache, $from, $to, $type,
         );
     };
-    my $code_query_db_get_rates_from_all_sources = sub {
+    my $code_query_db_get_spot_rates_from_all_sources = sub {
         # ugh, mysql 5.x still doesn't support LIMIT in IN subquery, so we need
         # to query once per source
 
@@ -310,7 +355,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
              query_time >= ? AND
              from_currency=? AND
              to_currency=? AND
-               type=?
+             type=?
            ORDER BY query_time DESC
            LIMIT 1");
         my @rows;
@@ -329,20 +374,25 @@ sub _get_all_spot_rates_or_get_spot_rate {
       QUERY_DB:
         {
             my $rate;
-            if ($source =~ /\A\w+\z/) {
-                $rate = $code_query_db_get_rate_from_a_source->($source);
+            if ($which eq 'get_all_spot_rates') {
+                @rates = $code_query_db_get_all_spot_rates->();
+                if (@rates) {
+                    last GET_RATES;
+                }
+            } elsif ($source =~ /\A\w+\z/) {
+                $rate = $code_query_db_get_spot_rate_from_a_source->($source);
                 if ($rate) {
                     push @rates, $rate;
                     last GET_RATES;
                 }
             } elsif ($source eq ':any') {
-                $rate = $code_query_db_get_rate_from_any_source->();
+                $rate = $code_query_db_get_spot_rate_from_any_source->();
                 if ($rate) {
                     push @rates, $rate;
                     last GET_RATES;
                 }
             } else {
-                @rates = $code_query_db_get_rates_from_all_sources->();
+                @rates = $code_query_db_get_spot_rates_from_all_sources->();
                 if (@rates) {
                     last GET_RATES;
                 }
@@ -392,7 +442,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
                             $sth_insert->execute(
                                 $time, $rate->{mtime},
                                 $rfrom, $rto, $rate->{rate}, $rate->{type},
-                                $src, $rate->{note});
+                                $src, $rate->{note}, 2);
                             $rate->{source} = $src;
                             if (!$pair || $pair eq $rate->{pair} && $type eq $rate->{type}) {
                                 push @rates, $rate;
@@ -416,7 +466,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
                         $sth_insert->execute(
                             $time, $rate->{mtime},
                             $from, $to, $rate->{rate}, $type,
-                            $src, $rate->{note});
+                            $src, $rate->{note}, 1);
                         $rate->{source} = $src;
                         push @rates, $rate;
                     } elsif ($res->[0] == 501) {
