@@ -361,6 +361,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
 
               GET_ALL_SPOT_RATES:
                 {
+                    last unless $which eq 'get_all_spot_rates';
                     my $time = time();
                     my $res = &{"$mod\::get_all_spot_rates"}();
                     log_trace "Got response from source '%s': %s", $src, $res;
@@ -385,7 +386,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
 
               GET_SPOT_RATE:
                 {
-                    last if $which eq 'get_all_spot_rates';
+                    last unless $which eq 'get_spot_rate';
                     my $time = time();
                     my $res = &{"$mod\::get_spot_rate"}($from, $to, $type);
                     log_trace "Got response from source: %s", $res;
