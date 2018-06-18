@@ -1,3 +1,32 @@
+0.004   2018-06-19 (PERLANCAR)
+
+	[BUG FIXES]
+
+        - Fix :average for get_all_spot_rates().
+
+	- Forgot to return mtime in cached information.
+
+	- Fix logging statement (perl undef warning).
+
+        [REMOVED]
+
+	- get_spot_rate(): Remove 'amount' argument.
+
+        [INTERNAL]
+
+	- get_spot_rate(): Do not call source's get_all_spot_rates(), so the
+	  source can reject unknown pairs properly.
+
+	- Bump database schema version to 4: add _key field so we can cache
+	  result of get_all_spot_rates() separately from get_spot_rate().
+
+        [ENHANCEMENTS]
+
+	- Return 'cached' and 'cache_time' in hash result.
+
+        - [ux] [cli] Add format for result fields.
+
+
 0.003   2018-06-19 (PERLANCAR)
 
 	[INCOMPATIBLE CHANGES]
