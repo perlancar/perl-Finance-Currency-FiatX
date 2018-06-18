@@ -8,6 +8,9 @@ use strict;
 use warnings;
 use Log::ger;
 
+use Role::Tiny;
+with 'Finance::Currency::FiatX::Role::Source';
+
 sub get_all_spot_rates {
     require Finance::Currency::Convert::GMC;
     my $res = Finance::Currency::Convert::GMC::get_currencies();
@@ -21,26 +24,26 @@ sub get_all_spot_rates {
             {
                 pair => "$to/IDR",
                 type => "buy",
-                price => $h->{buy},
+                rate => $h->{buy},
                 mtime => $res->[2]{mtime},
             },
             {
                 pair => "$to/IDR",
                 type => "sell",
-                price => $h->{sell},
+                rate => $h->{sell},
                 mtime => $res->[2]{mtime},
             },
             {
                 pair => "IDR/$to",
                 type => "buy",
-                price => 1/$h->{sell},
+                rate => 1/$h->{sell},
                 note => "1/sell",
                 mtime => $res->[2]{mtime},
             },
             {
                 pair => "IDR/$to",
                 type => "sell",
-                price => 1/$h->{buy},
+                rate => 1/$h->{buy},
                 note => "1/buy",
                 mtime => $res->[2]{mtime},
             },
@@ -53,9 +56,9 @@ sub get_all_spot_rates {
 sub get_spot_rate {
     my ($from, $to, $type) = @_;
 
-    return [412, "This source only provides buy/sell rate types"]
+    return [501, "This source only provides buy/sell rate types"]
         unless $type =~ /\A(buy|sell)\z/;
-    return [412, "This source only provides IDR/* or */IDR spot rates"]
+    return [501, "This source only provides IDR/* or */IDR spot rates"]
         unless $from eq 'IDR' || $to eq 'IDR';
 
     require Finance::Currency::Convert::GMC;
@@ -73,18 +76,18 @@ sub get_spot_rate {
     ;
     if ($from eq 'IDR') {
         if ($type eq 'buy') {
-            $rate->{price} = 1/$h->{sell};
+            $rate->{rate} = 1/$h->{sell};
             $rate->{note} = "1/sell";
         } elsif ($type eq 'sell') {
-            $rate->{price} = 1/$h->{buy};
+            $rate->{rate} = 1/$h->{buy};
             $rate->{note} = "1/buy";
         }
     } else {
         if ($type eq 'buy') {
-            $rate->{price} = $h->{buy};
+            $rate->{rate} = $h->{buy};
             $rate->{note} = "buy";
         } elsif ($type eq 'sell') {
-            $rate->{price} = $h->{sell};
+            $rate->{rate} = $h->{sell};
             $rate->{note} = "sell";
         }
     }
@@ -93,7 +96,7 @@ sub get_spot_rate {
 }
 
 sub get_historical_rate {
-    return [412, "This source does not provide historical rates"];
+    return [501, "This source does not provide historical rates"];
 }
 
 1;

@@ -8,6 +8,9 @@ use strict;
 use warnings;
 use Log::ger;
 
+use Role::Tiny;
+with 'Finance::Currency::FiatX::Role::Source';
+
 sub get_all_spot_rates {
     require Finance::Currency::Convert::KlikBCA;
     my $res = Finance::Currency::Convert::KlikBCA::get_currencies();
@@ -21,28 +24,28 @@ sub get_all_spot_rates {
             {
                 pair => "$to/IDR",
                 type => "buy",
-                price => $h->{buy_er},
+                rate => $h->{buy_er},
                 note => "buy_er",
                 mtime => $res->[2]{mtime_er},
             },
             {
                 pair => "$to/IDR",
                 type => "sell",
-                price => $h->{sell_er},
+                rate => $h->{sell_er},
                 note => "sell_er",
                 mtime => $res->[2]{mtime_er},
             },
             {
                 pair => "IDR/$to",
                 type => "buy",
-                price => 1/$h->{sell_er},
+                rate => 1/$h->{sell_er},
                 note => "1/sell_er",
                 mtime => $res->[2]{mtime_er},
             },
             {
                 pair => "IDR/$to",
                 type => "sell",
-                price => 1/$h->{buy_er},
+                rate => 1/$h->{buy_er},
                 note => "1/buy_er",
                 mtime => $res->[2]{mtime_er},
             },
@@ -55,9 +58,9 @@ sub get_all_spot_rates {
 sub get_spot_rate {
     my ($from, $to, $type) = @_;
 
-    return [412, "This source only provides buy/sell rate types"]
+    return [501, "This source only provides buy/sell rate types"]
         unless $type =~ /\A(buy|sell)\z/;
-    return [412, "This source only provides IDR/* or */IDR spot rates"]
+    return [501, "This source only provides IDR/* or */IDR spot rates"]
         unless $from eq 'IDR' || $to eq 'IDR';
 
     require Finance::Currency::Convert::KlikBCA;
@@ -75,18 +78,18 @@ sub get_spot_rate {
     ;
     if ($from eq 'IDR') {
         if ($type eq 'buy') {
-            $rate->{price} = 1/$h->{sell_er};
+            $rate->{rate} = 1/$h->{sell_er};
             $rate->{note} = "1/sell_er";
         } elsif ($type eq 'sell') {
-            $rate->{price} = 1/$h->{buy_er};
+            $rate->{rate} = 1/$h->{buy_er};
             $rate->{note} = "1/buy_er";
         }
     } else {
         if ($type eq 'buy') {
-            $rate->{price} = $h->{buy_er};
+            $rate->{rate} = $h->{buy_er};
             $rate->{note} = "buy_er";
         } elsif ($type eq 'sell') {
-            $rate->{price} = $h->{sell_er};
+            $rate->{rate} = $h->{sell_er};
             $rate->{note} = "sell_er";
         }
     }
@@ -94,8 +97,8 @@ sub get_spot_rate {
     [200, "OK", $rate];
 }
 
-sub get_historical_rate {
-    return [412, "This source does not provide historical rates"];
+sub get_historical_rates {
+    return [501, "This source does not provide historical rates"];
 }
 
 1;

@@ -4,7 +4,7 @@ package Finance::Currency::FiatX;
 # VERSION
 
 use 5.010001;
-use strict;
+use strict 'subs', 'vars';
 use warnings;
 use Log::ger;
 
@@ -28,65 +28,108 @@ our %args_caching = (
             'we retrieve rate from remote source again',
         schema => 'posint*',
         default => 4*3600,
+        cmdline_aliases => {
+            no_cache => {summary => 'Alias for --max-age-cache 0', code => sub { $_[0]{max_age_cache} = 0 }},
+        },
     },
 );
 
-our %args_convert = (
-    amount => {
-        schema => 'num*',
-        default => 1,
+our %arg_source = (
+    source => {
+        summary => 'Ask for a specific remote source',
+        schema => ['str*', {
+            match=>qr/\A(?:\w+|:(?:any|all|highest|lowest|newest|oldest|average))\z/,
+        }],
+        default => ':any',
+        completion => sub {
+            require Complete::Module;
+            require Complete::Util;
+
+            my %args = @_;
+
+            my $mods = Complete::Module::complete_module(
+                word => $args{word},
+                find_pod => 0,
+                find_prefix => 0,
+                ns_prefix => 'Finance::Currency::FiatX::Source',
+            );
+
+            Complete::Util::combine_answers(
+                $mods,
+                [':any', ':highest', ':lowest', 'newest', ':oldest', ':average'],
+            );
+        },
+        description => <<'_',
+
+If you want a specific remote source, you can specify it here. The default is
+':any' which is to pick the first source that returns a recent enough current
+rate.
+
+Other special values: `:highest` to return highest rate of all sources,
+`:lowest` to return lowest rate of all sources, ':newest' to return rate from
+source with the newest last update time, ':oldest' to return rate from source
+with the oldest last update time, ':average' to return arithmetic average of all
+sources.
+
+_
     },
+);
+
+our %arg_req0_source = (
+    source => {
+        %{ $arg_source{source} },
+        req => 1,
+        pos => 0,
+    },
+);
+
+our %args_spot_rate = (
     from => {
         schema => 'currency::code*',
         req => 1,
+        pos => 0,
     },
     to => {
         schema => 'currency::code*',
         req => 1,
+        pos => 1,
+    },
+    amount => {
+        schema => 'num*',
+        default => 1,
+        pos => 2,
     },
     type => {
         summary => 'Which rate is wanted? e.g. sell, buy',
-        schema => 'str*', in=>['sell', 'buy', '', ''],
+        schema => 'str*', in=>['sell', 'buy'],
         default => 'sell', # because we want to buy
     },
-    source => {
-        summary => 'Ask for a specific remote source',
-        schema => 'str*',
-        description => <<'_',
-
-If you want a specific remote source, you can specify it here. The default (when
-left undef) is to pick the first source that returns a recent enough current
-rate.
-
-Special values: `:highest` to return highest rate of all sources, `:lowest` to
-return lowest rate of all sources.
-
-_
-    },
+    %arg_source,
 );
 
 sub _get_db_schema_spec {
     my $table_prefix = shift;
 
     +{
-        latest_v => 2,
+        latest_v => 3,
         component_name => 'fiatx',
         provides => ["${table_prefix}rate"],
         install => [
             "CREATE TABLE ${table_prefix}rate (
+                 id INT NOT NULL PRIMARY KEY,
                  query_time DOUBLE NOT NULL, -- when do we query the source?
                  mtime DOUBLE, -- when is the rate last updated, according to the source?
                  from_currency VARCHAR(10) NOT NULL,
                  to_currency   VARCHAR(10) NOT NULL,
                  rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
-                 source VARCHAR(10) NOT NULL,         -- e.g. KlikBCA
+                 source VARCHAR(10),                  -- e.g. KlikBCA
                  type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
-                 note VARCHAR(255)
+                 note VARCHAR(255),
              )",
-            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(time)",
+            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
         ],
         upgrade_to_v3 => [
-            "ALTER TABLE ${table_prefix}rate CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
+            "ALTER TABLE ${table_prefix}rate ADD id INT NOT NULL PRIMARY KEY AUTO_INCREMENT FIRST, CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
         ],
         upgrade_to_v2 => [
             "ALTER TABLE ${table_prefix}rate CHANGE currency1 from_currency VARCHAR(10) NOT NULL, CHANGE currency2 to_currency VARCHAR(10) NOT NULL",
@@ -134,197 +177,354 @@ sub _init {
     $res->[0] == 200 or die "Can't initialize FiatX's database schema: $res->[1]";
 }
 
-$SPEC{convert_fiat_currency} = {
+$SPEC{get_all_spot_rates} = {
     v => 1.1,
-    summary => 'Convert fiat currency using current rate',
+    summary => 'Get all spot rates from a source',
+    args => {
+        %args_db,
+        %arg_req0_source,
+        %args_caching,
+    },
+};
+sub get_all_spot_rates {
+    my %args = @_;
+    _get_all_spot_rates_or_get_spot_rate('get_all_spot_rates', %args);
+}
+
+$SPEC{get_spot_rate} = {
+    v => 1.1,
+    summary => 'Get spot (latest) rate',
     args => {
         %args_db,
         %args_caching,
-        %args_convert,
+        %args_spot_rate,
     },
 };
-sub convert_fiat_currency {
+sub get_spot_rate {
     my %args = @_;
+    _get_all_spot_rates_or_get_spot_rate('get_spot_rate', %args);
+}
+
+sub _get_all_spot_rates_or_get_spot_rate {
+    my ($which, %args) = @_;
 
     _init(\%args);
     my $dbh = $args{dbh};
-    my $table_prefix = $args{table_prefix};
-    my $source = $args{source};
-    my $max_age_cache = $args{max_age_cache};
-
+    # XXX schema
     my $from   = $args{from};
     my $to     = $args{to};
     my $amount = $args{amount} // 1;
+    my $table_prefix = $args{table_prefix} // 'fiatx_';
+    my $max_age_cache = $args{max_age_cache} // 4*3600;
     my $type   = $args{type} // 'sell';
+    my $source = $args{source} // ':any';
 
-    # in case user does this
-    if ($from eq $to) {
-        return [200, "OK (no conversion)", $amount];
+    if ($which eq 'get_spot_rate') {
+        $from or return [400, "Please specify from"];
+        $to or return [400, "Please specify to"];
+        return [400, "Source cannot be :all for get_spot_rate()"]
+            if $source eq ':all';
+        # in case user does this
+        if ($from eq $to) {
+            return [304, "OK (identity)", $amount];
+        }
+    } else {
+        $source or return [400, "Please specify from"];
     }
 
+    my $pair; $pair = "$from/$to" if $from && $to;
+
     my $sth_insert = $dbh->prepare(
-        "INSERT INTO ${table_prefix}rate (query_time,mtime, from_currency,to_currency,rate,type, source,note) VALUES (?,?, ?,?,?,?, ?,?)"
+        "INSERT INTO ${table_prefix}rate
+           (query_time,mtime, from_currency,to_currency,rate,type, source,note) VALUES
+           (?,?, ?,?,?,?, ?,?)"
     );
 
     my $now = time();
 
-    my $code_query_db = sub {
+    my $code_query_db_get_rate_from_a_source = sub {
         my ($source) = @_;
         return $dbh->selectrow_hashref(
-            "SELECT * FROM ${table_prefix}rate WHERE source=? AND query_time >= ? AND from_currency=? AND to_currency=?".
-                ($args{type} ? " AND type=?" : "").
-                " ORDER BY time DESC,source,type LIMIT 1", {},
+            "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+             FROM ${table_prefix}rate
+             WHERE
+               source=? AND
+               query_time >= ? AND
+               from_currency=? AND
+               to_currency=? AND
+               type=?
+            ORDER BY query_time DESC
+            LIMIT 1", {},
             $source, $now - $max_age_cache, $from, $to, $type,
         );
     };
+    my $code_query_db_get_rate_from_any_source = sub {
+        return $dbh->selectrow_hashref(
+            "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+             FROM ${table_prefix}rate
+             WHERE
+               query_time >= ? AND
+               from_currency=? AND
+               to_currency=? AND
+               type=?
+            ORDER BY query_time DESC
+            LIMIT 1", {},
+            $now - $max_age_cache, $from, $to, $type,
+        );
+    };
+    my $code_query_db_get_rates_from_all_sources = sub {
+        # ugh, mysql 5.x still doesn't support LIMIT in IN subquery, so we need
+        # to query once per source
 
-    my @from_sources;
-  QUERY_KLIKBCA:
+        my $sth = $dbh->prepare(
+            "SELECT DISTINCT source
+             FROM ${table_prefix}rate
+             WHERE
+               query_time>=? AND
+               from_currency=? AND
+               to_currency=? AND
+               type=?");
+        $sth->execute($now - $max_age_cache, $from, $to, $type);
+        my @srcs;
+        while (my ($src) = $sth->fetchrow_array) { push @srcs, $src }
+        $sth = $dbh->prepare(
+          "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+           FROM ${table_prefix}rate
+           WHERE
+             source = ? AND
+             query_time >= ? AND
+             from_currency=? AND
+             to_currency=? AND
+               type=?
+           ORDER BY query_time DESC
+           LIMIT 1");
+        my @rows;
+        for my $src (@srcs) {
+            $sth->execute($src, $now - $max_age_cache, $from, $to, $type);
+            my $row = $sth->fetchrow_hashref;
+            next unless $row; # shouldn't happen but for guard against race condition
+            push @rows, $row;
+        }
+        @rows;
+    };
+
+    my @rates;
+  GET_RATES:
     {
-        last unless $source && $source ne 'klikbca' || $from eq 'IDR' || $to eq 'IDR';
-        my $row = $code_query_db->('klikbca');
-        unless ($row) {
+      QUERY_DB:
+        {
+            my $rate;
+            if ($source =~ /\A\w+\z/) {
+                $rate = $code_query_db_get_rate_from_a_source->($source);
+                if ($rate) {
+                    push @rates, $rate;
+                    last GET_RATES;
+                }
+            } elsif ($source eq ':any') {
+                $rate = $code_query_db_get_rate_from_any_source->();
+                if ($rate) {
+                    push @rates, $rate;
+                    last GET_RATES;
+                }
+            } else {
+                @rates = $code_query_db_get_rates_from_all_sources->();
+                if (@rates) {
+                    last GET_RATES;
+                }
+            }
+            log_trace "There are no cached rates that are recent enough, ".
+                "querying remote source(s) ...";
+        }
 
-    # try local database
-    my $row = $code_query_db->();
-    if ($row && $now - $row->{time} <= $max_age_cache) {
-        # data from local database is recent enough (< max_age_cache),
-        # return it
-        return [200, "OK (cached)", $amount * $row->{rate}, {
-            'func.raw' => $row,
-        }];
+        my @sources;
+      LIST_SOURCES:
+        {
+            if ($source =~ /\A\w+\z/) {
+                @sources = ($source);
+                last;
+            }
+
+            require PERLANCAR::Module::List;
+            my $mods = PERLANCAR::Module::List::list_modules(
+                'Finance::Currency::FiatX::Source::', {list_modules=>1});
+            unless (keys %$mods) {
+                return [412, "No source modules available"];
+            }
+            for my $src (sort keys %$mods) {
+                $src =~ s/^Finance::Currency::FiatX::Source:://;
+                push @sources, $src;
+            }
+        }
+
+      QUERY_SOURCES:
+        {
+          SOURCE:
+            for my $src (@sources) {
+                log_trace "Querying source '$src' for $pair spot rate ...";
+                my $mod = "Finance::Currency::FiatX::Source::$src";
+                (my $modpm = "$mod.pm") =~ s!::!/!g;
+                require $modpm;
+
+              GET_ALL_SPOT_RATES:
+                {
+                    my $time = time();
+                    my $res = &{"$mod\::get_all_spot_rates"}();
+                    log_trace "Got response from source '%s': %s", $src, $res;
+                    if ($res->[0] == 200) {
+                        for my $rate (@{ $res->[2] }) {
+                            my ($rfrom, $rto) = $rate->{pair} =~ m!(.+)/(.+)!;
+                            $sth_insert->execute(
+                                $time, $rate->{mtime},
+                                $rfrom, $rto, $rate->{rate}, $rate->{type},
+                                $src, $rate->{note});
+                            $rate->{source} = $src;
+                            if (!$pair || $pair eq $rate->{pair} && $type eq $rate->{type}) {
+                                push @rates, $rate;
+                            }
+                        }
+                    } elsif ($res->[0] == 501) {
+                        last GET_ALL_SPOT_RATES;
+                    } else {
+                        next SOURCE;
+                    }
+                }
+
+              GET_SPOT_RATE:
+                {
+                    last if $which eq 'get_all_spot_rates';
+                    my $time = time();
+                    my $res = &{"$mod\::get_spot_rate"}($from, $to, $type);
+                    log_trace "Got response from source: %s", $res;
+                    if ($res->[0] == 200) {
+                        my $rate = $res->[2];
+                        $sth_insert->execute(
+                            $time, $rate->{mtime},
+                            $from, $to, $rate->{rate}, $type,
+                            $src, $rate->{note});
+                        $rate->{source} = $src;
+                        push @rates, $rate;
+                    } elsif ($res->[0] == 501) {
+                        last GET_SPOT_RATE;
+                    } else {
+                        next SOURCE;
+                    }
+                }
+
+                last if @rates && $source eq ':any';
+            } # SOURCE
+        } # QUERY_SOURCES
+    } # GET_RATES
+
+    if ($source eq ':highest') {
+        my %highest_rates; # key = pair
+        my %sources; # key = pair, value = {source1=>1, ...}
+        for my $rate (@rates) {
+            $sources{$rate->{pair}}{$rate->{source}} = 1;
+            $highest_rates{ $rate->{pair} } = $rate
+                if !$highest_rates{ $rate->{pair} } ||
+                $highest_rates{ $rate->{pair} }{rate} < $rate->{rate};
+        }
+        @rates = map {$highest_rates{$_}} sort keys %highest_rates;
+        for my $rate (@rates) {
+            my @s = sort keys %{ $sources{$rate->{pair}} };
+            if (@s > 1) {
+                $rate->{note} = $rate->{note} ?
+                    "$rate->{note} (highest of ".join(", ", @s).")" :
+                    'highest of '.join(", ", @s);
+            }
+        }
+    } elsif ($source eq ':lowest') {
+        my %lowest_rates; # key = pair
+        my %sources; # key = pair, value = {source1=>1, ...}
+        for my $rate (@rates) {
+            $sources{$rate->{pair}}{$rate->{source}} = 1;
+            $lowest_rates{ $rate->{pair} } = $rate
+                if !$lowest_rates{ $rate->{pair} } ||
+                $lowest_rates{ $rate->{pair} }{rate} > $rate->{rate};
+        }
+        @rates = map {$lowest_rates{$_}} sort keys %lowest_rates;
+        for my $rate (@rates) {
+            my @s = sort keys %{ $sources{$rate->{pair}} };
+            if (@s > 1) {
+                $rate->{note} = $rate->{note} ?
+                    "$rate->{note} (lowest of ".join(", ", @s).")" :
+                    'lowest of '.join(", ", @s);
+            }
+        }
+    } elsif ($source eq ':newest') {
+        my %newest_rates; # key = pair
+        my %sources; # key = pair, value = {source1=>1, ...}
+        for my $rate (@rates) {
+            $sources{$rate->{pair}}{$rate->{source}} = 1;
+            $newest_rates{ $rate->{pair} } = $rate
+                if !$newest_rates{ $rate->{pair} } ||
+                $newest_rates{ $rate->{pair} }{mtime} < $rate->{mtime};
+        }
+        @rates = map {$newest_rates{$_}} sort keys %newest_rates;
+        for my $rate (@rates) {
+            my @s = sort keys %{ $sources{$rate->{pair}} };
+            if (@s > 1) {
+                $rate->{note} = $rate->{note} ?
+                    "$rate->{note} (newest of ".join(", ", @s).")" :
+                    'newest of '.join(", ", @s);
+            }
+        }
+    } elsif ($source eq ':oldest') {
+        my %oldest_rates; # key = pair
+        my %sources; # key = pair, value = {source1=>1, ...}
+        for my $rate (@rates) {
+            $sources{$rate->{pair}}{$rate->{source}} = 1;
+            $oldest_rates{ $rate->{pair} } = $rate
+                if !$oldest_rates{ $rate->{pair} } ||
+                $oldest_rates{ $rate->{pair} }{mtime} > $rate->{mtime};
+        }
+        @rates = map {$oldest_rates{$_}} sort keys %oldest_rates;
+        for my $rate (@rates) {
+            my @s = sort keys %{ $sources{$rate->{pair}} };
+            if (@s > 1) {
+                $rate->{note} = $rate->{note} ?
+                    "$rate->{note} (oldest of ".join(", ", @s).")" :
+                    'oldest of '.join(", ", @s);
+            }
+        }
+    } elsif ($source eq ':average') {
+        my %sources; # key = pair, value = {source1=>1, ...}
+        my %sums_rates; # key = pair
+        my %sums_mtimes; # key = pair
+        my %notes; # key = pair
+        for my $rate (@rates) {
+            $sources{$rate->{pair}}{$rate->{source}} = 1;
+            $sums_rates { $rate->{pair} } //= 0;
+            $sums_rates { $rate->{pair} } += $rate->{rate};
+            $sums_mtimes{ $rate->{pair} } //= 0;
+            $sums_mtimes{ $rate->{pair} } += $rate->{mtime};
+            $notes{ $rate->{pair} } = $rate->{note};
+        }
+        my @avg_rates;
+        for my $pair (sort keys %sums_rates) {
+            my @avg_srcs = sort keys %{ $sources{$pair} };
+            my $avg_rate = {
+                pair => $pair,
+                mtime => $sums_mtimes{$pair} / @avg_srcs,
+                rate  => $sums_rates {$pair} / @avg_srcs,
+                type => $type,
+                source => @avg_srcs > 1 ? undef : $avg_srcs[0],
+                note => @avg_srcs > 1 ?
+                    "(average of ".join(", ", @avg_srcs).")" : $notes{$pair},
+            };
+            push @avg_rates, $avg_rate;
+        }
+        @rates = @avg_rates;
     }
 
-    # try retrieving rate from remote sources
-    my $remote_fail;
-  TRY_REMOTE:
-    {
-      TRY_KLIKBCA:
-        {
-            my $fre = qr/\A(AUD|EUR|SGD|USD)\z/;
-            my $fcur; # foreign currency
-            if ($from eq 'IDR' && $to =~ $fre) {
-                $fcur = $to;
-            } elsif ($to eq 'IDR' && $from =~ $fre) {
-                $fcur = $from;
-            } else {
-                last;
-            }
-            require Finance::Currency::Convert::KlikBCA;
-            log_trace "Getting $fcur-IDR exchange rate from KlikBCA ...";
-            my $res = Finance::Currency::Convert::KlikBCA::get_currencies();
-            unless ($res->[0] == 200) {
-                log_warn "Couldn't get exchange rate from KlikBCA: $res->[0] - $res->[1]";
-                last TRY_KLIKBCA;
-            }
-            my ($sell_er, $buy_er) = ($res->[2]{currencies}{$fcur}{sell_er}, $res->[2]{currencies}{$fcur}{buy_er});
-            if (!$sell_er || !$buy_er) {
-                log_warn "sell_er and/or buy_er prices are zero or not found, skipping using KlikBCA prices";
-                last TRY_KLIKBCA;
-            }
-            if (!$res->[2]{mtime_er}) {
-                log_warn "No last update time information for e-Rate returned, skipping using KlikBCA prices";
-                last TRY_KLIKBCA;
-            }
-            if ($now - $res->[2]{mtime_er} > 4*86400) {
-                log_warn "Last update time information for e-Rate is over 4 days old, skipping using KlikBCA prices";
-                last TRY_KLIKBCA;
-            }
-            log_trace "Got $fcur-IDR rates from KlikBCA: sell_er=%s=%.8f, buy_er=%.8f", $sell_er, $buy_er;
+    unless (@rates) {
+        return [404, "Couldn't find any rates"];
+    }
 
-            my $now = time();
-            $sth_insert->execute(
-                $now,
-                $fcur, "IDR", $sell_er, "sell",
-                "KlikBCA", "sell_er",
-            );
-            $sth_insert->execute(
-                $now,
-                $fcur, "IDR", $buy_er, "buy",
-                "KlikBCA", "buy_er",
-            );
-            $sth_insert->execute(
-                $now,
-                "IDR", $fcur, 1/$sell_er, "buy",
-                "KlikBCA", "1/sell_er $fcur-IDR",
-            );
-            $sth_insert->execute(
-                $now,
-                "IDR", $fcur, 1/$buy_er, "sell",
-                "KlikBCA", "1/buy_er $fcur-IDR",
-            );
-            last TRY_REMOTE;
-        } # TRY_KLIKBCA
-
-      TRY_GMC:
-        {
-            my $fre = qr/\A(AUD|CNY|EUR|GBP|HKD|JPY|MYR|SAR|SGD|USD)\z/;
-            my $fcur; # foreign currency
-            if ($from eq 'IDR' && $to =~ $fre) {
-                $fcur = $to;
-            } elsif ($to eq 'IDR' && $from =~ $fre) {
-                $fcur = $from;
-            } else {
-                last;
-            }
-            require Finance::Currency::Convert::GMC;
-            log_trace "Getting $fcur-IDR exchange rate from GMC ...";
-            my $res = Finance::Currency::Convert::GMC::get_currencies();
-            unless ($res->[0] == 200) {
-                log_warn "Couldn't get exchange rate from GMC: $res->[0] - $res->[1]";
-                last TRY_GMC;
-            }
-            my ($sell, $buy) = ($res->[2]{currencies}{$fcur}{sell}, $res->[2]{currencies}{$fcur}{buy});
-            if (!$sell || !$buy) {
-                log_warn "sell and/or buy prices are zero or not found, skipping using GMC prices";
-                last TRY_GMC;
-            }
-            log_trace "Got $fcur-IDR rates from GMC: sell=%s=%.8f, buy=%.8f", $sell, $buy;
-
-            my $now = time();
-            $sth_insert->execute(
-                $now,
-                $fcur, "IDR", $sell, "sell",
-                "GMC", "sell",
-            );
-            $sth_insert->execute(
-                $now,
-                $fcur, "IDR", $buy, "buy",
-                "GMC", "buy",
-            );
-            $sth_insert->execute(
-                $now,
-                "IDR", $fcur, 1/$sell, "buy",
-                "GMC", "1/sell $fcur-IDR",
-            );
-            $sth_insert->execute(
-                $now,
-                "IDR", $fcur, 1/$buy, "sell",
-                "GMC", "1/buy $fcur-IDR",
-            );
-            last TRY_REMOTE;
-        } # TRY_GMC
-
-        # TODO: TRY_ECBDAILY for EUR
-        $remote_fail = 1;
-    } # TRY
-
-    if ($remote_fail) {
-        # return stale data that is still regarded as current
-        if ($row) {
-            return [200, "OK (older cache)", $amount * $row->{rate}, {
-                'func.raw' => $row,
-            }];
-        } else {
-            return [412, "Couldn't query remote source or any recent cached rates"];
-        }
+    if ($which eq 'get_spot_rate') {
+        [200, "OK", $rates[0]];
     } else {
-        $row = $code_query_db->();
-        return [500, "Something weird is going on, data in database seems to vanish"]
-            unless $row;
-        return [200, "OK (queried from remote)", $amount * $row->{rate}, {
-            'func.raw' => $row,
-        }];
+        [200, "OK", \@rates];
     }
 }
 
