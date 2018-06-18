@@ -239,7 +239,14 @@ sub _get_all_spot_rates_or_get_spot_rate {
     my $code_query_db_get_rate_from_a_source = sub {
         my ($source) = @_;
         return $dbh->selectrow_hashref(
-            "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+            "SELECT
+               1 cached,
+               CONCAT(from_currency,'/',to_currency) pair,
+               type,
+               rate,
+               note,
+               source,
+               query_time cache_time
              FROM ${table_prefix}rate
              WHERE
                source=? AND
@@ -254,7 +261,14 @@ sub _get_all_spot_rates_or_get_spot_rate {
     };
     my $code_query_db_get_rate_from_any_source = sub {
         return $dbh->selectrow_hashref(
-            "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+            "SELECT
+               1 cached,
+               CONCAT(from_currency,'/',to_currency) pair,
+               type,
+               rate,
+               note,
+               source,
+               query_time cache_time
              FROM ${table_prefix}rate
              WHERE
                query_time >= ? AND
@@ -282,7 +296,14 @@ sub _get_all_spot_rates_or_get_spot_rate {
         my @srcs;
         while (my ($src) = $sth->fetchrow_array) { push @srcs, $src }
         $sth = $dbh->prepare(
-          "SELECT *, CONCAT(from_currency,'/',to_currency) pair
+          "SELECT
+             1 cached,
+             CONCAT(from_currency,'/',to_currency) pair,
+             type,
+             rate,
+             note,
+             source,
+             query_time cache_time
            FROM ${table_prefix}rate
            WHERE
              source = ? AND
