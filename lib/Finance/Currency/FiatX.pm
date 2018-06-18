@@ -101,7 +101,7 @@ our %args_spot_rate = (
     },
     type => {
         summary => 'Which rate is wanted? e.g. sell, buy',
-        schema => 'str*', in=>['sell', 'buy'],
+        schema => ['str*', in=>['sell', 'buy']],
         default => 'sell', # because we want to buy
     },
     %arg_source,
@@ -122,9 +122,9 @@ sub _get_db_schema_spec {
                  from_currency VARCHAR(10) NOT NULL,
                  to_currency   VARCHAR(10) NOT NULL,
                  rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
-                 source VARCHAR(10),                  -- e.g. KlikBCA
+                 source VARCHAR(10) NOT NULL,
                  type VARCHAR(4) NOT NULL DEFAULT '', -- 'sell', 'buy', or empty
-                 note VARCHAR(255),
+                 note VARCHAR(255)
              )",
             "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
         ],

@@ -104,6 +104,8 @@ sub get_historical_rates {
 1;
 # ABSTRACT: Get currency conversion rates from BCA (Bank Central Asia)
 
+=for Pod::Coverage ^(.+)$
+
 =head1 DESCRIPTION
 
 Bank Central Asia is one of the largest retail banks in Indonesia.

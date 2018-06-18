@@ -102,6 +102,8 @@ sub get_historical_rate {
 1;
 # ABSTRACT: Get currency conversion rates from GMC (Golden Money Changer)
 
+=for Pod::Coverage ^(.+)$
+
 =head1 DESCRIPTION
 
 Golden Money Changer is a popular money changer in Jakarta/Bandung, Indonesia.

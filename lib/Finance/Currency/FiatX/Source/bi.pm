@@ -102,6 +102,8 @@ sub get_historical_rate {
 1;
 # ABSTRACT: Get currency conversion rates from BI (Bank Indonesia)
 
+=for Pod::Coverage ^(.+)$
+
 =head1 DESCRIPTION
 
 Bank Indonesia is Indonesia's central bank.
