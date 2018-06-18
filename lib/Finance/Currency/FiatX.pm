@@ -264,6 +264,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
                rate,
                note,
                source,
+               mtime,
                query_time cache_time
              FROM ${table_prefix}rate
              WHERE
@@ -286,6 +287,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
              rate,
              note,
              source,
+             mtime,
              query_time cache_time
            FROM ${table_prefix}rate
            WHERE
@@ -313,6 +315,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
                rate,
                note,
                source,
+               mtime,
                query_time cache_time
              FROM ${table_prefix}rate
              WHERE
@@ -348,6 +351,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
              rate,
              note,
              source,
+             mtime,
              query_time cache_time
            FROM ${table_prefix}rate
            WHERE
@@ -590,7 +594,14 @@ sub _get_all_spot_rates_or_get_spot_rate {
     if ($which eq 'get_spot_rate') {
         [200, "OK", $rates[0]];
     } else {
-        [200, "OK", \@rates];
+        my $fnum8 = ['number', {precision=>8}];
+
+        my $resmeta = {};
+        $resmeta->{'table.fields'}        = ['source', 'pair', 'type', 'rate',  'mtime',            'note', 'cache_time'];
+        $resmeta->{'table.field_formats'} = [undef,    undef,   undef,  $fnum8, 'iso8601_datetime', undef , 'iso8601_datetime'];
+        $resmeta->{'table.field_aligns'}  = ['left',   'ldef', 'left', 'right', 'left'];
+
+        [200, "OK", \@rates, $resmeta];
     }
 }
 
