@@ -94,11 +94,6 @@ our %args_spot_rate = (
         req => 1,
         pos => 1,
     },
-    amount => {
-        schema => 'num*',
-        default => 1,
-        pos => 2,
-    },
     type => {
         summary => 'Which rate is wanted? e.g. sell, buy',
         schema => ['str*', in=>['sell', 'buy']],
@@ -213,7 +208,6 @@ sub _get_all_spot_rates_or_get_spot_rate {
     # XXX schema
     my $from   = $args{from};
     my $to     = $args{to};
-    my $amount = $args{amount} // 1;
     my $table_prefix = $args{table_prefix} // 'fiatx_';
     my $max_age_cache = $args{max_age_cache} // 4*3600;
     my $type   = $args{type} // 'sell';
@@ -226,7 +220,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
             if $source eq ':all';
         # in case user does this
         if ($from eq $to) {
-            return [304, "OK (identity)", $amount];
+            return [304, "OK (identity)", 1];
         }
     } else {
         $source or return [400, "Please specify from"];
