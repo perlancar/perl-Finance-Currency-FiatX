@@ -279,6 +279,20 @@ sub _get_all_spot_rates_or_get_spot_rate {
         );
     };
     my $code_query_db_get_all_spot_rates = sub {
+        # ugh, mysql 5.x still doesn't support LIMIT in IN subquery, so we need
+        # to query once per source
+        my @srcs;
+        if ($source =~ /\A\w+\z/) {
+            @srcs = ($source);
+        } else {
+            my $sth = $dbh->prepare(
+                "SELECT DISTINCT source
+                 FROM ${table_prefix}rate
+                 WHERE
+                   query_time>=?");
+            $sth->execute($now - $max_age_cache);
+            while (my ($src) = $sth->fetchrow_array) { push @srcs, $src }
+        }
         my $sth = $dbh->prepare(
           "SELECT
              1 cached,
@@ -292,17 +306,23 @@ sub _get_all_spot_rates_or_get_spot_rate {
            FROM ${table_prefix}rate
            WHERE
              query_time >= ? AND
-             ".($source =~ /\A\w+\z/ ? " source=? AND" : "")."
+             source=? AND
              _key=2
            ORDER BY query_time, pair, type DESC
            ");
-        $sth->execute(
-            $now - $max_age_cache,
-            ($source) x !!($source =~ /\A\w+\z/)
-        );
         my @rows;
-        while (my $row = $sth->fetchrow_hashref) {
-            push @rows, $row;
+        # we don't record each caching series, only mtime. 2+ sessions can
+        # have the same mtime
+        my %seen; # key = source + pair + type
+        for my $src (@srcs) {
+            $sth->execute(
+                $now - $max_age_cache,
+                $src,
+            );
+            while (my $row = $sth->fetchrow_hashref) {
+                my $key = "$row->{source} $row->{pair} $row->{type}";
+                push @rows, $row unless $seen{$key}++;
+            }
         }
         @rows;
     };
@@ -331,7 +351,6 @@ sub _get_all_spot_rates_or_get_spot_rate {
     my $code_query_db_get_spot_rates_from_all_sources = sub {
         # ugh, mysql 5.x still doesn't support LIMIT in IN subquery, so we need
         # to query once per source
-
         my $sth = $dbh->prepare(
             "SELECT DISTINCT source
              FROM ${table_prefix}rate
@@ -486,17 +505,19 @@ sub _get_all_spot_rates_or_get_spot_rate {
     } # GET_RATES
 
     if ($source eq ':highest') {
-        my %highest_rates; # key = pair
-        my %sources; # key = pair, value = {source1=>1, ...}
+        my %highest_rates; # key = pair+type
+        my %sources; # key = pair+type, value = {source1=>1, ...}
         for my $rate (@rates) {
-            $sources{$rate->{pair}}{$rate->{source}} = 1;
-            $highest_rates{ $rate->{pair} } = $rate
-                if !$highest_rates{ $rate->{pair} } ||
-                $highest_rates{ $rate->{pair} }{rate} < $rate->{rate};
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            $sources{$key}{$rate->{source}} = 1;
+            $highest_rates{$key} = $rate
+                if !$highest_rates{$key} ||
+                $highest_rates{$key}{rate} < $rate->{rate};
         }
         @rates = map {$highest_rates{$_}} sort keys %highest_rates;
         for my $rate (@rates) {
-            my @s = sort keys %{ $sources{$rate->{pair}} };
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            my @s = sort keys %{ $sources{$key} };
             if (@s > 1) {
                 $rate->{note} = $rate->{note} ?
                     "$rate->{note} (highest of ".join(", ", @s).")" :
@@ -504,17 +525,19 @@ sub _get_all_spot_rates_or_get_spot_rate {
             }
         }
     } elsif ($source eq ':lowest') {
-        my %lowest_rates; # key = pair
-        my %sources; # key = pair, value = {source1=>1, ...}
+        my %lowest_rates;
+        my %sources;
         for my $rate (@rates) {
-            $sources{$rate->{pair}}{$rate->{source}} = 1;
-            $lowest_rates{ $rate->{pair} } = $rate
-                if !$lowest_rates{ $rate->{pair} } ||
-                $lowest_rates{ $rate->{pair} }{rate} > $rate->{rate};
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            $sources{$key}{$rate->{source}} = 1;
+            $lowest_rates{$key} = $rate
+                if !$lowest_rates{$key} ||
+                $lowest_rates{$key}{rate} > $rate->{rate};
         }
         @rates = map {$lowest_rates{$_}} sort keys %lowest_rates;
         for my $rate (@rates) {
-            my @s = sort keys %{ $sources{$rate->{pair}} };
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            my @s = sort keys %{ $sources{$key} };
             if (@s > 1) {
                 $rate->{note} = $rate->{note} ?
                     "$rate->{note} (lowest of ".join(", ", @s).")" :
@@ -522,17 +545,19 @@ sub _get_all_spot_rates_or_get_spot_rate {
             }
         }
     } elsif ($source eq ':newest') {
-        my %newest_rates; # key = pair
-        my %sources; # key = pair, value = {source1=>1, ...}
+        my %newest_rates;
+        my %sources;
         for my $rate (@rates) {
-            $sources{$rate->{pair}}{$rate->{source}} = 1;
-            $newest_rates{ $rate->{pair} } = $rate
-                if !$newest_rates{ $rate->{pair} } ||
-                $newest_rates{ $rate->{pair} }{mtime} < $rate->{mtime};
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            $sources{$key}{$rate->{source}} = 1;
+            $newest_rates{$key} = $rate
+                if !$newest_rates{$key} ||
+                $newest_rates{$key}{mtime} < $rate->{mtime};
         }
         @rates = map {$newest_rates{$_}} sort keys %newest_rates;
         for my $rate (@rates) {
-            my @s = sort keys %{ $sources{$rate->{pair}} };
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            my @s = sort keys %{ $sources{$key} };
             if (@s > 1) {
                 $rate->{note} = $rate->{note} ?
                     "$rate->{note} (newest of ".join(", ", @s).")" :
@@ -540,17 +565,19 @@ sub _get_all_spot_rates_or_get_spot_rate {
             }
         }
     } elsif ($source eq ':oldest') {
-        my %oldest_rates; # key = pair
-        my %sources; # key = pair, value = {source1=>1, ...}
+        my %oldest_rates;
+        my %sources;
         for my $rate (@rates) {
-            $sources{$rate->{pair}}{$rate->{source}} = 1;
-            $oldest_rates{ $rate->{pair} } = $rate
-                if !$oldest_rates{ $rate->{pair} } ||
-                $oldest_rates{ $rate->{pair} }{mtime} > $rate->{mtime};
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            $sources{$key}{$rate->{source}} = 1;
+            $oldest_rates{$key} = $rate
+                if !$oldest_rates{$key} ||
+                $oldest_rates{$key}{mtime} > $rate->{mtime};
         }
         @rates = map {$oldest_rates{$_}} sort keys %oldest_rates;
         for my $rate (@rates) {
-            my @s = sort keys %{ $sources{$rate->{pair}} };
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            my @s = sort keys %{ $sources{$key} };
             if (@s > 1) {
                 $rate->{note} = $rate->{note} ?
                     "$rate->{note} (oldest of ".join(", ", @s).")" :
@@ -558,29 +585,31 @@ sub _get_all_spot_rates_or_get_spot_rate {
             }
         }
     } elsif ($source eq ':average') {
-        my %sources; # key = pair, value = {source1=>1, ...}
-        my %sums_rates; # key = pair
-        my %sums_mtimes; # key = pair
-        my %notes; # key = pair
+        my %sources;
+        my %sums_rates;
+        my %sums_mtimes;
+        my %notes;
         for my $rate (@rates) {
-            $sources{$rate->{pair}}{$rate->{source}} = 1;
-            $sums_rates { $rate->{pair} } //= 0;
-            $sums_rates { $rate->{pair} } += $rate->{rate};
-            $sums_mtimes{ $rate->{pair} } //= 0;
-            $sums_mtimes{ $rate->{pair} } += $rate->{mtime};
-            $notes{ $rate->{pair} } = $rate->{note};
+            my $key = $rate->{pair} . '-' . $rate->{type};
+            $sources{$key}{$rate->{source}} = 1;
+            $sums_rates {$key} //= 0;
+            $sums_rates {$key} += $rate->{rate};
+            $sums_mtimes{$key} //= 0;
+            $sums_mtimes{$key} += $rate->{mtime};
+            $notes{$key} = $rate->{note};
         }
         my @avg_rates;
-        for my $pair (sort keys %sums_rates) {
-            my @avg_srcs = sort keys %{ $sources{$pair} };
+        for my $key (sort keys %sums_rates) {
+            my ($pair, $type) = split /-/, $key;
+            my @avg_srcs = sort keys %{ $sources{$key} };
             my $avg_rate = {
                 pair => $pair,
-                mtime => $sums_mtimes{$pair} / @avg_srcs,
-                rate  => $sums_rates {$pair} / @avg_srcs,
+                mtime => $sums_mtimes{$key} / @avg_srcs,
+                rate  => $sums_rates {$key} / @avg_srcs,
                 type => $type,
                 source => @avg_srcs > 1 ? undef : $avg_srcs[0],
                 note => @avg_srcs > 1 ?
-                    "(average of ".join(", ", @avg_srcs).")" : $notes{$pair},
+                    "(average of ".join(", ", @avg_srcs).")" : $notes{$key},
             };
             push @avg_rates, $avg_rate;
         }
