@@ -354,7 +354,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
         {
           SOURCE:
             for my $src (@sources) {
-                log_trace "Querying source '$src' for $pair spot rate ...";
+                log_trace "Querying source '$src' ...";
                 my $mod = "Finance::Currency::FiatX::Source::$src";
                 (my $modpm = "$mod.pm") =~ s!::!/!g;
                 require $modpm;
