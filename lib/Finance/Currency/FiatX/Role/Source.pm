@@ -67,7 +67,7 @@ of C<< <from_currency>/<to_currency> >>, e.g. C<USD/IDR>), C<rate> (num, the
 rate), C<mtime> (Unix epoch, last updated time for the rate, according to the
 source). C<type> ("buy" or "sell").
 
-=head2 get_historical_rates
+=head2 TODO: get_historical_rates
 
 Usage:
 
