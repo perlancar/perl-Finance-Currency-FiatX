@@ -12,6 +12,11 @@ use List::Util qw(max);
 
 our %SPEC;
 
+$SPEC{':package'} = {
+    v => 1.1,
+    summary => 'Fiat currency exchange rate library',
+};
+
 our %args_db = (
     dbh => {
         schema => ['obj*'],
@@ -645,8 +650,9 @@ See L<fiatx> from L<App::fiatx> for an example on how to use this module.
 =head1 DESCRIPTION
 
 FiatX is a library/application to convert one fiat currency to another using
-several backend modules (C<Finance::Currency::Convert::*>) and store the rates
-in L<DBI> database.
+several backend modules ("sources", C<Finance::Currency::FiatX::Source::*>,
+which in turns usually utilize C<Finance::Currency::Convert::*>) and store the
+rates in L<DBI> database for caching.
 
 
 =head1 SEE ALSO
