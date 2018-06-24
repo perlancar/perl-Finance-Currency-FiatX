@@ -1,3 +1,9 @@
+0.006   2018-06-24 (PERLANCAR)
+
+	- [Bugfix] database schema: Forgot to specify AUTO_INCREMENT for rate
+          table.
+
+
 0.005   2018-06-19 (PERLANCAR)
 
 	- No functional changes.
