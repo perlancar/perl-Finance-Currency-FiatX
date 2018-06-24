@@ -111,7 +111,7 @@ sub _get_db_schema_spec {
         provides => ["${table_prefix}rate"],
         install => [
             "CREATE TABLE ${table_prefix}rate (
-                 id INT NOT NULL PRIMARY KEY,
+                 id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
                  query_time DOUBLE NOT NULL, -- when do we query the source?
                  mtime DOUBLE, -- when is the rate last updated, according to the source?
                  from_currency VARCHAR(10) NOT NULL,
