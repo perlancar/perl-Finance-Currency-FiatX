@@ -1,3 +1,9 @@
+0.007   2018-06-25 (PERLANCAR)
+
+	- To be more consistent, when asked for conversion from X to X,
+	  return payload {rate=>1} instead of payload=1.
+
+
 0.006   2018-06-24 (PERLANCAR)
 
 	- [Bugfix] database schema: Forgot to specify AUTO_INCREMENT for rate
