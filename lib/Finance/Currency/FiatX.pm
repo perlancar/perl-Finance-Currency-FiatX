@@ -243,7 +243,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
             if $source eq ':all';
         # in case user does this
         if ($from eq $to) {
-            return [304, "OK (identity)", 1];
+            return [304, "OK (identity)", {rate=>1}];
         }
     } else {
         $source or return [400, "Please specify from"];
