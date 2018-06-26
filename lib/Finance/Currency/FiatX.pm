@@ -111,10 +111,37 @@ sub _get_db_schema_spec {
     my $table_prefix = shift;
 
     +{
-        latest_v => 4,
+        latest_v => 5,
         component_name => 'fiatx',
         provides => ["${table_prefix}rate"],
         install => [
+            "CREATE TABLE ${table_prefix}rate (
+                 id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                 query_time DOUBLE NOT NULL, -- when do we query the source?
+                 mtime DOUBLE, -- when is the rate last updated, according to the source?
+                 from_currency VARCHAR(10) NOT NULL,
+                 to_currency   VARCHAR(10) NOT NULL,
+                 rate DECIMAL(21,8) NOT NULL,         -- multiplier to use to convert 1 unit of from_currency to to_currency, e.g. from_currency = USD, to_currency = IDR, rate = 14000
+                 source VARCHAR(10) NOT NULL,
+                 type VARCHAR(32) NOT NULL DEFAULT '', -- 'sell', 'buy', etc
+                 note VARCHAR(255),
+                 _key TINYINT -- 1 = get_spot_rate, 2=get_all_spot_rates
+             )",
+            "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
+        ],
+        upgrade_to_v5 => [
+            "ALTER TABLE ${table_prefix}rate CHANGE type type VARCHAR(32) NOT NULL DEFAULT ''",
+        ],
+        upgrade_to_v4 => [
+            "ALTER TABLE ${table_prefix}rate ADD _key TINYINT",
+        ],
+        upgrade_to_v3 => [
+            "ALTER TABLE ${table_prefix}rate ADD id INT NOT NULL PRIMARY KEY AUTO_INCREMENT FIRST, CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
+        ],
+        upgrade_to_v2 => [
+            "ALTER TABLE ${table_prefix}rate CHANGE currency1 from_currency VARCHAR(10) NOT NULL, CHANGE currency2 to_currency VARCHAR(10) NOT NULL",
+        ],
+        install_v4 => [
             "CREATE TABLE ${table_prefix}rate (
                  id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
                  query_time DOUBLE NOT NULL, -- when do we query the source?
@@ -128,15 +155,6 @@ sub _get_db_schema_spec {
                  _key TINYINT -- 1 = get_spot_rate, 2=get_all_spot_rates
              )",
             "CREATE INDEX ${table_prefix}rate_time ON ${table_prefix}rate(query_time)",
-        ],
-        upgrade_to_v4 => [
-            "ALTER TABLE ${table_prefix}rate ADD _key TINYINT",
-        ],
-        upgrade_to_v3 => [
-            "ALTER TABLE ${table_prefix}rate ADD id INT NOT NULL PRIMARY KEY AUTO_INCREMENT FIRST, CHANGE time query_time DOUBLE NOT NULL, ADD mtime DOUBLE",
-        ],
-        upgrade_to_v2 => [
-            "ALTER TABLE ${table_prefix}rate CHANGE currency1 from_currency VARCHAR(10) NOT NULL, CHANGE currency2 to_currency VARCHAR(10) NOT NULL",
         ],
         install_v3 => [
             "CREATE TABLE ${table_prefix}rate (
