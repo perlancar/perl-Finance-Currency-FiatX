@@ -101,8 +101,7 @@ our %args_spot_rate = (
     },
     type => {
         summary => 'Which rate is wanted? e.g. sell, buy',
-        schema => ['str*', in=>['sell', 'buy']],
-        default => 'sell', # because we want to buy
+        schema => 'str*',
     },
     %arg_source,
 );
