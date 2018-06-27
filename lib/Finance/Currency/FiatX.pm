@@ -31,7 +31,7 @@ our %args_caching = (
     max_age_cache => {
         summary => 'Above this age (in seconds), '.
             'we retrieve rate from remote source again',
-        schema => 'posint*',
+        schema => 'nonnegint*',
         default => 4*3600,
         cmdline_aliases => {
             no_cache => {is_flag=>1, summary => 'Alias for --max-age-cache 0', code => sub { $_[0]{max_age_cache} = 0 }},
