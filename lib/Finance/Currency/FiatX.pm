@@ -654,7 +654,8 @@ sub _get_all_spot_rates_or_get_spot_rate {
         $resmeta->{'table.fields'}        = ['source', 'pair', 'type', 'rate',  'mtime',            'note', 'cache_time'];
         $resmeta->{'table.field_formats'} = [undef,    undef,   undef,  $fnum8, 'iso8601_datetime', undef , 'iso8601_datetime'];
         $resmeta->{'table.field_aligns'}  = ['left',   'ldef', 'left', 'right', 'left'];
-
+        $resmeta->{'table.field_align_code'}  = sub { $_[0] =~ /^(buy|sell)/ ? 'right' : undef },
+        $resmeta->{'table.field_format_code'} = sub { $_[0] =~ /^(buy|sell)/ ? $fnum8  : undef },
         [200, "OK", \@rates, $resmeta];
     }
 }
