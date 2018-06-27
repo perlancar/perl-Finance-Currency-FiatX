@@ -218,8 +218,9 @@ $SPEC{get_all_spot_rates} = {
     summary => 'Get all spot rates from a source',
     args => {
         %args_db,
-        %arg_req0_source,
         %args_caching,
+
+        %arg_req0_source,
     },
 };
 sub get_all_spot_rates {
@@ -233,6 +234,7 @@ $SPEC{get_spot_rate} = {
     args => {
         %args_db,
         %args_caching,
+
         %args_spot_rate,
     },
 };

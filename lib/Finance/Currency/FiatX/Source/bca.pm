@@ -81,7 +81,11 @@ sub get_all_spot_rates {
 }
 
 sub get_spot_rate {
-    my ($from, $to, $type) = @_;
+    my %args = @_;
+
+    my $from = $args{from} or return [400, "Please specify from"];
+    my $to   = $args{to} or return [400, "Please specify to"];
+    my $type = $args{type} or return [400, "Please specify type"];
 
     return [501, "This source only provides buy/sell rate types"]
         unless $type =~ /\A(buy|sell)\z/;
