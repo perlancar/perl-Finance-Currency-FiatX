@@ -12,8 +12,8 @@ use Role::Tiny;
 with 'Finance::Currency::FiatX::Role::Source';
 
 sub get_all_spot_rates {
-    require Finance::Currency::Convert::KlikBCA;
-    my $res = Finance::Currency::Convert::KlikBCA::get_currencies();
+    require Finance::Currency::Convert::BCA;
+    my $res = Finance::Currency::Convert::BCA::get_currencies();
 
     return $res unless $res->[0] == 200;
 
@@ -92,8 +92,8 @@ sub get_spot_rate {
     return [501, "This source only provides IDR/* or */IDR spot rates"]
         unless $from eq 'IDR' || $to eq 'IDR';
 
-    require Finance::Currency::Convert::KlikBCA;
-    my $res = Finance::Currency::Convert::KlikBCA::get_currencies();
+    require Finance::Currency::Convert::BCA;
+    my $res = Finance::Currency::Convert::BCA::get_currencies();
     return $res unless $res->[0] == 200;
 
     my $h = $res->[2]{currencies}{$to} || $res->[2]{currencies}{$from};
