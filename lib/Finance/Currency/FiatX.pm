@@ -506,7 +506,7 @@ sub _get_all_spot_rates_or_get_spot_rate {
                 {
                     last unless $which eq 'get_spot_rate';
                     my $time = time();
-                    my $res = &{"$mod\::get_spot_rate"}($from, $to, $type);
+                    my $res = &{"$mod\::get_spot_rate"}(from => $from, to => $to, type => $type);
                     log_trace "Got response from source: %s", $res;
                     if ($res->[0] == 200) {
                         my $rate = $res->[2];
