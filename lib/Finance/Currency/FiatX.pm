@@ -10,11 +10,14 @@ use Log::ger;
 
 use List::Util qw(max);
 
+use Exporter qw(import);
+our @EXPORT_OK = qw(get_spot_rate get_all_spot_rates list_rate_sources);
+
 our %SPEC;
 
 $SPEC{':package'} = {
     v => 1.1,
-    summary => 'Fiat currency exchange rate library',
+    summary => 'Currency exchange rate library',
 };
 
 our %args_db = (
