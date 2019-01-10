@@ -218,6 +218,18 @@ sub _init {
 $SPEC{get_all_spot_rates} = {
     v => 1.1,
     summary => 'Get all spot rates from a source',
+    description => <<'_',
+
+This routine will retrieve all available spot rates from a source. You can
+either pick a specific source (e.g. `bi` for "Bank of Indonesia") or one of the
+special/"pseudo" sources: ':any', ':highest', ':lowest', 'newest', ':oldest',
+':average'.
+
+Some source provide rates for a large number of currency pairs, not all of which
+you might need. For retrieving rates for a specific currency pair only, use
+`get_spot_rate`.
+
+_
     args => {
         %args_db,
         %args_caching,
@@ -232,7 +244,23 @@ sub get_all_spot_rates {
 
 $SPEC{get_spot_rate} = {
     v => 1.1,
-    summary => 'Get spot (latest) rate',
+    summary => 'Get spot rate for a currency pair',
+    description => <<'_',
+
+This routine will retrieve spot rate(s) for a specific currency pair from a
+source. You can either let the routine pick any one source that is new enough
+(':any') or pick a specific source (e.g. `bi` for "Bank of Indonesia"), or one
+of the other special/"pseudo" sources: ':highest', ':lowest', 'newest',
+':oldest', ':average'.
+
+Note that there might be multiple spot rates for a single currency pair, because
+there might be different types of rates, for example: "buy", "sell", or more
+specific types or buy and sell rates.
+
+See also `get_all_spot_rates` to retrieve rates for all currency pairs available
+from a specific source.
+
+_
     args => {
         %args_db,
         %args_caching,
@@ -697,17 +725,27 @@ sub _get_all_spot_rates_or_get_spot_rate {
 
 =head1 SYNOPSIS
 
-See L<fiatx> from L<App::fiatx> for an example on how to use this module.
+The easiest way to use this module is via CLI L<fiatx> from L<App::fiatx>. To
+use this module directly, first create a MySQL database, then:
 
+ use Finance::Currency::FiatX qw(get_spot_rate get_all_spot_rates);
+
+ # connect to database
+ my $dbh = DBI->connect(...);
+
+ # create a database# get a single spot rate from any source
+ my $res = get_spot_rate(dbh => $dbh, from => "USD", to => "IDR");
 
 =head1 DESCRIPTION
 
-FiatX is a library/application to convert one fiat currency to another using
-several backend modules ("sources", C<Finance::Currency::FiatX::Source::*>,
-which in turns usually utilize C<Finance::Currency::Convert::*>) and store the
-rates in L<DBI> database for caching.
+FiatX is a library/application to convert one currency to another using several
+backend modules ("sources", C<Finance::Currency::FiatX::Source::*>, which in
+turns usually utilize C<Finance::Currency::Convert::*>) and store the rates in
+L<DBI> database for caching.
 
 
 =head1 SEE ALSO
 
 C<Finance::Currency::Convert::*> modules.
+
+L<App::fiatx> and L<fiatx> which provides CLI for this module.
