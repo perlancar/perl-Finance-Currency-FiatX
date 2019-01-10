@@ -242,6 +242,36 @@ sub get_spot_rate {
     _get_all_spot_rates_or_get_spot_rate('get_spot_rate', %args);
 }
 
+$SPEC{list_rate_sources} = {
+    v => 1.1,
+    summary => 'List exchange rate sources installed on the system',
+    description => <<'_',
+
+Sources are modules under the namespace `Finance::Currency::FiatX::Source::*`,
+for example the source `bi` ("Bank of Indonesia") is implemented in
+<pm:Finance::Currency::FiatX::Source::bi>. This routine lists the installed
+sources without the namespace prefix.
+
+_
+    args => {},
+};
+sub list_rate_sources {
+    my %args = @_;
+
+    require PERLANCAR::Module::List;
+    my @res;
+    my $mods = PERLANCAR::Module::List::list_modules(
+        'Finance::Currency::FiatX::Source::', {list_modules=>1});
+    unless (keys %$mods) {
+        return [412, "No source modules available"];
+    }
+    for my $src (sort keys %$mods) {
+        $src =~ s/^Finance::Currency::FiatX::Source:://;
+        push @res, $src;
+    }
+    return [200, "OK", \@res];
+}
+
 sub _get_all_spot_rates_or_get_spot_rate {
     my ($which, %args) = @_;
 
