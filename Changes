@@ -1,4 +1,4 @@
-0.011   2019-01-10 (PERLANCAR)
+0.011   2019-01-10  Released-By: PERLANCAR
 
 	- Add function: list_rate_sources().
 
@@ -7,20 +7,20 @@
 	- [doc] Add more documentation.
 
 
-0.010   2018-08-01 (PERLANCAR)
+0.010   2018-08-01  Released-By: PERLANCAR
 
         - [Bugfix] Forgot to call the source's get_spot_rate() with hash
           arguments.
 
 
-0.009   2018-07-15 (PERLANCAR)
+0.009   2018-07-15  Released-By: PERLANCAR
 
         - UPDATE 2018-08-01: this release is broken.
 
         - Add source: mandiri.
 
 
-0.008   2018-06-27 (PERLANCAR)
+0.008   2018-06-27  Released-By: PERLANCAR
 
         - UPDATE 2018-08-01: this release is broken.
 
@@ -39,26 +39,26 @@
 	- Fix Rinci metadata.
 
 
-0.007   2018-06-25 (PERLANCAR)
+0.007   2018-06-25  Released-By: PERLANCAR
 
 	- To be more consistent, when asked for conversion from X to X,
 	  return payload {rate=>1} instead of payload=1.
 
 
-0.006   2018-06-24 (PERLANCAR)
+0.006   2018-06-24  Released-By: PERLANCAR
 
 	- [Bugfix] database schema: Forgot to specify AUTO_INCREMENT for rate
           table.
 
 
-0.005   2018-06-19 (PERLANCAR)
+0.005   2018-06-19  Released-By: PERLANCAR
 
 	- No functional changes.
 
 	- Tweak Abstract & Description.
 
 
-0.004   2018-06-19 (PERLANCAR)
+0.004   2018-06-19  Released-By: PERLANCAR
 
 	[BUG FIXES]
 
@@ -87,7 +87,7 @@
         - [ux] [cli] Add format for result fields.
 
 
-0.003   2018-06-19 (PERLANCAR)
+0.003   2018-06-19  Released-By: PERLANCAR
 
 	[INCOMPATIBLE CHANGES]
 
@@ -112,7 +112,7 @@
           table, change 'time' column to 'query_time'.
 
 
-0.002   2018-05-10 (PERLANCAR)
+0.002   2018-05-10  Released-By: PERLANCAR
 
 	- [Bugfix] Fix SQL that caused us to always query from remote
 	  source.
@@ -124,6 +124,6 @@
 	  support column renames/changes.
 
 
-0.001   2018-05-09 (PERLANCAR)
+0.001   2018-05-09  Released-By: PERLANCAR
 
         - First release.
